@@ -74,6 +74,42 @@ def push_msg(request, _):
                         json_dumps_params={'ensure_ascii': False})
 
 
+def push_msg_list(request, _):
+    """
+    展示Excel中已存储的推送消息
+    """
+    excel_path = getattr(settings, 'PUSH_MSG_EXCEL_PATH',
+                         os.path.join(settings.BASE_DIR, EXCEL_FILE_NAME))
+    messages = []
+    error = None
+
+    if not os.path.exists(excel_path):
+        error = 'Excel文件不存在，请先调用 /push/msg 写入数据'
+    else:
+        try:
+            workbook = load_workbook(excel_path)
+            sheet = workbook.active
+            for received_at, payload in sheet.iter_rows(min_row=2, max_col=2, values_only=True):
+                if received_at is None and payload is None:
+                    continue
+                payload_text = payload
+                if isinstance(payload, str):
+                    try:
+                        payload_text = json.dumps(json.loads(payload), ensure_ascii=False, indent=2)
+                    except json.JSONDecodeError:
+                        payload_text = payload
+                messages.append({'received_at': received_at, 'payload': payload_text})
+        except Exception as exc:  # pylint: disable=broad-except
+            logger.exception('failed to load excel: %s', exc)
+            error = '读取Excel失败，请检查日志'
+
+    return render(request, 'push_messages.html', {
+        'messages': messages,
+        'excel_path': excel_path,
+        'error': error,
+    })
+
+
 def get_count():
     """
     获取当前计数
