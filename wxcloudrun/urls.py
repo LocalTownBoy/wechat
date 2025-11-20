@@ -18,6 +18,9 @@ from wxcloudrun import views
 from django.conf.urls import url
 
 urlpatterns = (
+    # 推送消息写入Excel
+    url(r'^^push/msg(/)?$', views.push_msg),
+
     # 计数器接口
     url(r'^^api/count(/)?$', views.counter),
 

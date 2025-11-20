@@ -1,12 +1,17 @@
+import datetime
 import json
 import logging
+import os
 
+from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import render
+from openpyxl import Workbook, load_workbook
 from wxcloudrun.models import Counters
 
 
 logger = logging.getLogger('log')
+EXCEL_FILE_NAME = 'push_messages.xlsx'
 
 
 def index(request, _):
@@ -36,6 +41,37 @@ def counter(request, _):
                             json_dumps_params={'ensure_ascii': False})
     logger.info('response result: {}'.format(rsp.content.decode('utf-8')))
     return rsp
+
+
+def push_msg(request, _):
+    """
+    接收微信公众号推送的JSON消息并写入Excel
+    """
+
+    if request.method not in ['POST', 'post']:
+        return JsonResponse({'code': -1, 'errorMsg': '请求方式错误'},
+                            json_dumps_params={'ensure_ascii': False}, status=405)
+
+    if not request.body:
+        return JsonResponse({'code': -1, 'errorMsg': '请求体为空'},
+                            json_dumps_params={'ensure_ascii': False})
+
+    try:
+        body_unicode = request.body.decode('utf-8')
+        payload = json.loads(body_unicode)
+    except json.JSONDecodeError:
+        return JsonResponse({'code': -1, 'errorMsg': '请求体不是合法JSON'},
+                            json_dumps_params={'ensure_ascii': False})
+
+    try:
+        file_path = _append_to_excel(payload)
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception('failed to write push message to excel: %s', exc)
+        return JsonResponse({'code': -1, 'errorMsg': '写入Excel失败'},
+                            json_dumps_params={'ensure_ascii': False})
+
+    return JsonResponse({'code': 0, 'data': {'file': file_path}},
+                        json_dumps_params={'ensure_ascii': False})
 
 
 def get_count():
@@ -89,3 +125,38 @@ def update_count(request):
     else:
         return JsonResponse({'code': -1, 'errorMsg': 'action参数错误'},
                     json_dumps_params={'ensure_ascii': False})
+
+
+def _append_to_excel(payload):
+    """
+    将推送消息写入Excel，按时间顺序追加
+    """
+    excel_path = getattr(settings, 'PUSH_MSG_EXCEL_PATH',
+                         os.path.join(settings.BASE_DIR, EXCEL_FILE_NAME))
+    directory = os.path.dirname(excel_path)
+
+    if directory and not os.path.exists(directory):
+        os.makedirs(directory, exist_ok=True)
+
+    workbook = _load_or_create_workbook(excel_path)
+    sheet = workbook.active
+    sheet.append([
+        datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        json.dumps(payload, ensure_ascii=False)
+    ])
+    workbook.save(excel_path)
+    return excel_path
+
+
+def _load_or_create_workbook(excel_path):
+    """
+    获取已存在的工作簿，或创建新的并初始化表头
+    """
+    if os.path.exists(excel_path):
+        return load_workbook(excel_path)
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = 'messages'
+    sheet.append(['received_at', 'payload'])
+    return workbook
