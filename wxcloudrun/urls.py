@@ -24,6 +24,8 @@ urlpatterns = (
     url(r'^^push/list(/)?$', views.push_msg_list),
     # 论文收集页面
     url(r'^^papers(/)?$', views.papers),
+    # 主动向公众号用户推送文本（需要配置 WX_APPID / WX_SECRET）
+    url(r'^^wx/send(/)?$', views.wx_send_message),
 
     # 计数器接口
     url(r'^^api/count(/)?$', views.counter),

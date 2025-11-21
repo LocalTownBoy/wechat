@@ -3,17 +3,22 @@ import json
 import logging
 import os
 import re
+import time
 
 from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import render
 from openpyxl import Workbook, load_workbook
+import requests
 import pdfplumber
 from wxcloudrun.models import Counters, Paper
 
 
 logger = logging.getLogger('log')
 EXCEL_FILE_NAME = 'push_messages.xlsx'
+WX_APPID = os.getenv("WX_APPID")
+WX_SECRET = os.getenv("WX_SECRET")
+_token_cache = {"value": None, "expires_at": 0}
 
 
 def index(request, _):
@@ -161,6 +166,42 @@ def papers(request, _):
         'error': error,
         'parsed': parsed,
     })
+
+
+def wx_send_message(request, _):
+    """
+    主动向公众号用户推送文本消息
+    """
+    if request.method not in ['POST', 'post']:
+        return JsonResponse({'code': -1, 'errorMsg': '请求方式错误'},
+                            json_dumps_params={'ensure_ascii': False}, status=405)
+
+    try:
+        body = json.loads(request.body.decode('utf-8'))
+    except Exception:  # pylint: disable=broad-except
+        return JsonResponse({'code': -1, 'errorMsg': '请求体需为JSON'},
+                            json_dumps_params={'ensure_ascii': False})
+
+    openid = body.get('openid', '').strip()
+    content = body.get('content', '').strip()
+
+    if not openid or not content:
+        return JsonResponse({'code': -1, 'errorMsg': '缺少openid或content'},
+                            json_dumps_params={'ensure_ascii': False})
+
+    if not WX_APPID or not WX_SECRET:
+        return JsonResponse({'code': -1, 'errorMsg': '未配置WX_APPID/WX_SECRET'},
+                            json_dumps_params={'ensure_ascii': False})
+
+    try:
+        token = _get_access_token()
+        _send_wechat_text(token, openid, content)
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception('failed to send wechat message: %s', exc)
+        return JsonResponse({'code': -1, 'errorMsg': '发送失败，请查看日志'},
+                            json_dumps_params={'ensure_ascii': False})
+
+    return JsonResponse({'code': 0, 'data': 'ok'}, json_dumps_params={'ensure_ascii': False})
 
 
 def get_count():
@@ -319,3 +360,40 @@ def _parse_pdf(pdf_file):
         'sections': dedup_sections,
         'sections_text': sections_text,
     }
+
+
+def _get_access_token():
+    """
+    获取并缓存公众号 access_token
+    """
+    now = int(time.time())
+    if _token_cache["value"] and _token_cache["expires_at"] > now + 60:
+        return _token_cache["value"]
+
+    url = "https://api.weixin.qq.com/cgi-bin/token"
+    resp = requests.get(url, params={"grant_type": "client_credential",
+                                     "appid": WX_APPID,
+                                     "secret": WX_SECRET}, timeout=5)
+    data = resp.json()
+    if "access_token" not in data:
+        raise RuntimeError(f"get access_token failed: {data}")
+    _token_cache["value"] = data["access_token"]
+    _token_cache["expires_at"] = now + int(data.get("expires_in", 7200))
+    return _token_cache["value"]
+
+
+def _send_wechat_text(token, openid, content):
+    """
+    调用公众号客服消息接口发送文本
+    """
+    url = "https://api.weixin.qq.com/cgi-bin/message/custom/send"
+    payload = {
+        "touser": openid,
+        "msgtype": "text",
+        "text": {"content": content}
+    }
+    resp = requests.post(url, params={"access_token": token},
+                         json=payload, timeout=5)
+    data = resp.json()
+    if data.get("errcode", 0) != 0:
+        raise RuntimeError(f"send message failed: {data}")
