@@ -223,13 +223,13 @@ def wx_send_message(request, _):
 
     try:
         # token = _get_access_token()
-        _send_mass_message(payload)
+        data=_send_mass_message(payload)
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception('failed to send wechat message: %s', exc)
         return JsonResponse({'code': -1, 'errorMsg': '发送失败，请查看日志'},
                             json_dumps_params={'ensure_ascii': False})
 
-    return JsonResponse({'code': 0, 'data': 'ok'}, json_dumps_params={'ensure_ascii': False})
+    return JsonResponse({'code': 0, 'data': data}, json_dumps_params={'ensure_ascii': False})
 
 
 def wx_users_info(request, _):
