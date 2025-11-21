@@ -48,9 +48,9 @@
             {% if parsed %}
             <div class="alert alert-info mt-3" role="alert">
               <div class="fw-bold">自动解析结果</div>
-              <div>标题：{{ parsed.title or '（未识别）' }}</div>
-              <div>作者：{{ parsed.author or '（未识别）' }}</div>
-              <div>章节：{{ parsed.sections_text or '（未识别）' }}</div>
+              <div>标题：{{ parsed.title|default:"（未识别）" }}</div>
+              <div>作者：{{ parsed.author|default:"（未识别）" }}</div>
+              <div>章节：{{ parsed.sections_text|default:"（未识别）" }}</div>
             </div>
             {% endif %}
           </div>
