@@ -494,3 +494,4 @@ def _send_mass_message(payload):
     data = resp.json()
     if data.get("errcode", 0) != 0:
         raise RuntimeError(f"mass send failed: {data}")
+    return data
