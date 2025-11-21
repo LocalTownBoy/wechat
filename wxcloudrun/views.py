@@ -255,10 +255,17 @@ def _parse_pdf(pdf_file):
     """
     解析上传的 PDF，返回标题、作者、章节列表的最佳猜测
     """
+    try:
+        pdf_file.seek(0)
+    except Exception:  # pylint: disable=broad-except
+        pass
+
     reader = PdfReader(pdf_file)
     info = reader.metadata or {}
     title = ''
     author = ''
+    filename = getattr(pdf_file, 'name', '') or ''
+    base_title = os.path.splitext(os.path.basename(filename))[0] if filename else ''
 
     if info:
         raw_title = getattr(info, 'title', None) or info.get('/Title')
@@ -277,8 +284,11 @@ def _parse_pdf(pdf_file):
 
     lines = [ln.strip() for ln in full_text.splitlines() if ln.strip()]
 
-    if not title and lines:
-        title = lines[0][:255]
+    if not title:
+        if lines:
+            title = lines[0][:255]
+        elif base_title:
+            title = base_title[:255]
 
     if not author:
         for ln in lines[:5]:
@@ -288,7 +298,7 @@ def _parse_pdf(pdf_file):
                 break
 
     sections = []
-    section_pattern = re.compile(r'^(\d+(\.\d+)*)\s+(.+)|^(摘要|Abstract|引言|绪论|结论|参考文献)')
+    section_pattern = re.compile(r'^(\d+(\.\d+)*)\s+(.+)|^(摘要|Abstract|引言|绪论|结论|参考文献)', re.IGNORECASE)
     for ln in lines:
         if len(sections) >= 15:
             break
