@@ -442,6 +442,7 @@ def _get_access_token():
     resp = requests.get(url, params={"grant_type": "client_credential",
                                      "appid": WX_APPID,
                                      "secret": WX_SECRET}, timeout=5)
+    logger.info("get access_token resp: %s", resp.text)
     data = resp.json()
     if "access_token" not in data:
         raise RuntimeError(f"get access_token failed: {data}")
