@@ -484,7 +484,7 @@ def _batch_get_users(token, openids, lang):
     return data.get("user_info_list", [])
 
 
-def _send_mass_message(token, payload):
+def _send_mass_message(payload):
     """
     群发接口（按 openid 列表）
     """
