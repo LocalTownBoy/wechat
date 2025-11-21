@@ -194,10 +194,6 @@ def wx_send_message(request, _):
     send_ignore_reprint = body.get('send_ignore_reprint')
     text_obj = body.get('text') or {}
 
-    if not isinstance(touser, list) or len(touser) < 2:
-        return JsonResponse({'code': -1, 'errorMsg': 'touser需为长度>=2的openid数组'},
-                            json_dumps_params={'ensure_ascii': False})
-
     if len(touser) > 10000:
         touser = touser[:10000]
 
