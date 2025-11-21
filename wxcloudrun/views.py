@@ -8,7 +8,7 @@ from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import render
 from openpyxl import Workbook, load_workbook
-from PyPDF2 import PdfReader
+import pdfplumber
 from wxcloudrun.models import Counters, Paper
 
 
@@ -260,27 +260,28 @@ def _parse_pdf(pdf_file):
     except Exception:  # pylint: disable=broad-except
         pass
 
-    reader = PdfReader(pdf_file)
-    info = reader.metadata or {}
-    title = ''
-    author = ''
     filename = getattr(pdf_file, 'name', '') or ''
     base_title = os.path.splitext(os.path.basename(filename))[0] if filename else ''
 
-    if info:
-        raw_title = getattr(info, 'title', None) or info.get('/Title')
-        raw_author = getattr(info, 'author', None) or info.get('/Author')
+    with pdfplumber.open(pdf_file) as pdf:
+        # 尝试读取元数据
+        info = pdf.metadata or {}
+        title = ''
+        author = ''
+
+        raw_title = info.get('Title')
+        raw_author = info.get('Author')
         if raw_title:
             title = str(raw_title).strip()
         if raw_author:
             author = str(raw_author).strip()
 
-    # 抽取前几页文本用于解析章节/备用标题
-    texts = []
-    for page in reader.pages[:5]:
-        page_text = page.extract_text() or ''
-        texts.append(page_text)
-    full_text = '\n'.join(texts)
+        # 抽取前几页文本用于解析章节/备用标题
+        texts = []
+        for page in pdf.pages[:5]:
+            page_text = page.extract_text() or ''
+            texts.append(page_text)
+        full_text = '\n'.join(texts)
 
     lines = [ln.strip() for ln in full_text.splitlines() if ln.strip()]
 
@@ -305,7 +306,6 @@ def _parse_pdf(pdf_file):
         if section_pattern.match(ln):
             sections.append(ln[:255])
 
-    # 去重保序
     dedup_sections = []
     for sec in sections:
         if sec not in dedup_sections:
