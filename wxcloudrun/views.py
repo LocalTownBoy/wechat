@@ -32,6 +32,7 @@ _bootstrap_engine = create_engine(
     f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/",
     pool_pre_ping=True,
 )
+logger.info("DB config -> host=%s port=%s user=%s db=%s", DB_HOST, DB_PORT, DB_USER, DB_NAME)
 with _bootstrap_engine.connect() as conn:
     conn.execute(text(f"CREATE DATABASE IF NOT EXISTS `{DB_NAME}` DEFAULT CHARACTER SET utf8mb4"))
 
@@ -63,6 +64,7 @@ def index(request, _):
 
 
 def counter(request, _):
+    
     """
     获取当前计数
 
