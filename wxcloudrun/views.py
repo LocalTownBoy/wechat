@@ -2,11 +2,13 @@ import datetime
 import json
 import logging
 import os
+import re
 
 from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import render
 from openpyxl import Workbook, load_workbook
+from PyPDF2 import PdfReader
 from wxcloudrun.models import Counters, Paper
 
 
@@ -117,11 +119,23 @@ def papers(request, _):
     """
     message = None
     error = None
+    parsed = {}
 
     if request.method in ['POST', 'post']:
         title = request.POST.get('title', '').strip()
         author = request.POST.get('author', '').strip()
         section = request.POST.get('section', '').strip()
+        pdf_file = request.FILES.get('pdf')
+
+        if pdf_file:
+            try:
+                parsed = _parse_pdf(pdf_file)
+                title = title or parsed.get('title', '')
+                author = author or parsed.get('author', '')
+                section = section or parsed.get('sections_text', '')
+            except Exception as exc:  # pylint: disable=broad-except
+                logger.exception('failed to parse pdf: %s', exc)
+                error = 'PDF 解析失败，请检查文件格式'
 
         if not title or not author or not section:
             error = '请完整填写标题、作者和章节'
@@ -145,6 +159,7 @@ def papers(request, _):
         'papers': papers,
         'message': message,
         'error': error,
+        'parsed': parsed,
     })
 
 
@@ -234,3 +249,63 @@ def _load_or_create_workbook(excel_path):
     sheet.title = 'messages'
     sheet.append(['received_at', 'payload'])
     return workbook
+
+
+def _parse_pdf(pdf_file):
+    """
+    解析上传的 PDF，返回标题、作者、章节列表的最佳猜测
+    """
+    reader = PdfReader(pdf_file)
+    info = reader.metadata or {}
+    title = ''
+    author = ''
+
+    if info:
+        raw_title = getattr(info, 'title', None) or info.get('/Title')
+        raw_author = getattr(info, 'author', None) or info.get('/Author')
+        if raw_title:
+            title = str(raw_title).strip()
+        if raw_author:
+            author = str(raw_author).strip()
+
+    # 抽取前几页文本用于解析章节/备用标题
+    texts = []
+    for page in reader.pages[:5]:
+        page_text = page.extract_text() or ''
+        texts.append(page_text)
+    full_text = '\n'.join(texts)
+
+    lines = [ln.strip() for ln in full_text.splitlines() if ln.strip()]
+
+    if not title and lines:
+        title = lines[0][:255]
+
+    if not author:
+        for ln in lines[:5]:
+            m = re.search(r'(作者|Author)[:：]\s*(.+)', ln)
+            if m:
+                author = m.group(2).strip()[:255]
+                break
+
+    sections = []
+    section_pattern = re.compile(r'^(\d+(\.\d+)*)\s+(.+)|^(摘要|Abstract|引言|绪论|结论|参考文献)')
+    for ln in lines:
+        if len(sections) >= 15:
+            break
+        if section_pattern.match(ln):
+            sections.append(ln[:255])
+
+    # 去重保序
+    dedup_sections = []
+    for sec in sections:
+        if sec not in dedup_sections:
+            dedup_sections.append(sec)
+
+    sections_text = '; '.join(dedup_sections[:10])
+
+    return {
+        'title': title,
+        'author': author,
+        'sections': dedup_sections,
+        'sections_text': sections_text,
+    }
