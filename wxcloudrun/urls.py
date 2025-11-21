@@ -20,7 +20,10 @@ from django.conf.urls import url
 urlpatterns = (
     # 推送消息写入Excel
     url(r'^^push/msg(/)?$', views.push_msg),
+    # 展示微信公众号消息列表
     url(r'^^push/list(/)?$', views.push_msg_list),
+    # 论文收集页面
+    url(r'^^papers(/)?$', views.papers),
 
     # 计数器接口
     url(r'^^api/count(/)?$', views.counter),

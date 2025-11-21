@@ -2,16 +2,54 @@ import datetime
 import json
 import logging
 import os
+from urllib.parse import quote_plus
 
 from django.conf import settings
 from django.http import JsonResponse
 from django.shortcuts import render
 from openpyxl import Workbook, load_workbook
+from sqlalchemy import Column, Integer, String, create_engine, text
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import Session, sessionmaker
 from wxcloudrun.models import Counters
 
 
 logger = logging.getLogger('log')
 EXCEL_FILE_NAME = 'push_messages.xlsx'
+
+# SQLAlchemy 配置，用于论文收集
+DB_HOST = os.getenv("DB_HOST", "10.11.108.216")
+DB_PORT = os.getenv("DB_PORT", "3306")
+DB_USER = os.getenv("DB_USER", "root")
+DB_PASSWORD = quote_plus(os.getenv("DB_PASSWORD", "123123Wwb.,"))
+DB_NAME = os.getenv("DB_NAME", "papers")
+
+DATABASE_URL = (
+    f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4"
+)
+
+_bootstrap_engine = create_engine(
+    f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/",
+    pool_pre_ping=True,
+)
+with _bootstrap_engine.connect() as conn:
+    conn.execute(text(f"CREATE DATABASE IF NOT EXISTS `{DB_NAME}` DEFAULT CHARACTER SET utf8mb4"))
+
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+
+class Paper(Base):
+    __tablename__ = "papers"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(255), nullable=False)
+    author = Column(String(255), nullable=False)
+    section = Column(String(255), nullable=False)
+
+
+Base.metadata.create_all(bind=engine)
 
 
 def index(request, _):
@@ -106,6 +144,49 @@ def push_msg_list(request, _):
     return render(request, 'push_messages.html', {
         'messages': messages,
         'excel_path': excel_path,
+        'error': error,
+    })
+
+
+def papers(request, _):
+    """
+    收集论文信息（标题、作者、章节）并存入 MySQL，返回列表页面
+    """
+    message = None
+    error = None
+    session: Session = SessionLocal()
+
+    if request.method in ['POST', 'post']:
+        title = request.POST.get('title', '').strip()
+        author = request.POST.get('author', '').strip()
+        section = request.POST.get('section', '').strip()
+
+        if not title or not author or not section:
+            error = '请完整填写标题、作者和章节'
+        else:
+            try:
+                paper = Paper(title=title, author=author, section=section)
+                session.add(paper)
+                session.commit()
+                message = '已保存！'
+            except Exception as exc:  # pylint: disable=broad-except
+                session.rollback()
+                logger.exception('failed to save paper: %s', exc)
+                error = '保存失败，请检查日志'
+
+    try:
+        papers = session.query(Paper).order_by(Paper.id.desc()).all()
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception('failed to load papers: %s', exc)
+        papers = []
+        if not error:
+            error = '读取数据失败，请检查日志'
+    finally:
+        session.close()
+
+    return render(request, 'paper_form.html', {
+        'papers': papers,
+        'message': message,
         'error': error,
     })
 
