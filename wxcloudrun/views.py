@@ -170,7 +170,14 @@ def papers(request, _):
 
 def wx_send_message(request, _):
     """
-    主动向公众号用户推送文本消息
+    主动向公众号用户推送消息（基于微信群发接口）
+    请求示例:
+    {
+        "touser": ["openid1", "openid2"],
+        "msgtype": "text",
+        "text": {"content": "你好"},
+        "send_ignore_reprint": 0
+    }
     """
     if request.method not in ['POST', 'post']:
         return JsonResponse({'code': -1, 'errorMsg': '请求方式错误'},
@@ -182,12 +189,76 @@ def wx_send_message(request, _):
         return JsonResponse({'code': -1, 'errorMsg': '请求体需为JSON'},
                             json_dumps_params={'ensure_ascii': False})
 
-    openid = body.get('openid', '').strip()
-    content = body.get('content', '').strip()
+    touser = body.get('touser') or []
+    msgtype = (body.get('msgtype') or '').strip()
+    send_ignore_reprint = body.get('send_ignore_reprint')
+    text_obj = body.get('text') or {}
 
-    if not openid or not content:
-        return JsonResponse({'code': -1, 'errorMsg': '缺少openid或content'},
+    if not isinstance(touser, list) or len(touser) < 2:
+        return JsonResponse({'code': -1, 'errorMsg': 'touser需为长度>=2的openid数组'},
                             json_dumps_params={'ensure_ascii': False})
+
+    if len(touser) > 10000:
+        touser = touser[:10000]
+
+    if msgtype not in ['text']:
+        return JsonResponse({'code': -1, 'errorMsg': '当前仅支持msgtype=text'},
+                            json_dumps_params={'ensure_ascii': False})
+
+    if msgtype == 'text':
+        content = text_obj.get('content', '').strip()
+        if not content:
+            return JsonResponse({'code': -1, 'errorMsg': 'text.content 不能为空'},
+                                json_dumps_params={'ensure_ascii': False})
+
+    if not WX_APPID or not WX_SECRET:
+        return JsonResponse({'code': -1, 'errorMsg': '未配置WX_APPID/WX_SECRET'},
+                            json_dumps_params={'ensure_ascii': False})
+
+    payload = {
+        "touser": touser,
+        "msgtype": msgtype,
+    }
+    if send_ignore_reprint is not None:
+        payload["send_ignore_reprint"] = send_ignore_reprint
+
+    if msgtype == 'text':
+        payload["text"] = {"content": content}
+
+    try:
+        token = _get_access_token()
+        _send_mass_message(token, payload)
+    except Exception as exc:  # pylint: disable=broad-except
+        logger.exception('failed to send wechat message: %s', exc)
+        return JsonResponse({'code': -1, 'errorMsg': '发送失败，请查看日志'},
+                            json_dumps_params={'ensure_ascii': False})
+
+    return JsonResponse({'code': 0, 'data': 'ok'}, json_dumps_params={'ensure_ascii': False})
+
+
+def wx_users_info(request, _):
+    """
+    获取关注用户基本信息（批量，每次最多100个 openid）
+    """
+    if request.method not in ['POST', 'post']:
+        return JsonResponse({'code': -1, 'errorMsg': '请求方式错误'},
+                            json_dumps_params={'ensure_ascii': False}, status=405)
+
+    try:
+        body = json.loads(request.body.decode('utf-8'))
+    except Exception:  # pylint: disable=broad-except
+        return JsonResponse({'code': -1, 'errorMsg': '请求体需为JSON'},
+                            json_dumps_params={'ensure_ascii': False})
+
+    openids = body.get('openids') or []
+    lang = body.get('lang', 'zh_CN')
+
+    if not isinstance(openids, list) or not openids:
+        return JsonResponse({'code': -1, 'errorMsg': 'openids需为非空数组'},
+                            json_dumps_params={'ensure_ascii': False})
+
+    if len(openids) > 100:
+        openids = openids[:100]
 
     if not WX_APPID or not WX_SECRET:
         return JsonResponse({'code': -1, 'errorMsg': '未配置WX_APPID/WX_SECRET'},
@@ -195,13 +266,14 @@ def wx_send_message(request, _):
 
     try:
         token = _get_access_token()
-        _send_wechat_text(token, openid, content)
+        data = _batch_get_users(token, openids, lang)
     except Exception as exc:  # pylint: disable=broad-except
-        logger.exception('failed to send wechat message: %s', exc)
-        return JsonResponse({'code': -1, 'errorMsg': '发送失败，请查看日志'},
+        logger.exception('failed to get users info: %s', exc)
+        return JsonResponse({'code': -1, 'errorMsg': '获取失败，请查看日志'},
                             json_dumps_params={'ensure_ascii': False})
 
-    return JsonResponse({'code': 0, 'data': 'ok'}, json_dumps_params={'ensure_ascii': False})
+    return JsonResponse({'code': 0, 'data': data},
+                        json_dumps_params={'ensure_ascii': False})
 
 
 def get_count():
@@ -397,3 +469,31 @@ def _send_wechat_text(token, openid, content):
     data = resp.json()
     if data.get("errcode", 0) != 0:
         raise RuntimeError(f"send message failed: {data}")
+
+
+def _batch_get_users(token, openids, lang):
+    """
+    调用批量获取用户基本信息接口
+    """
+    url = "https://api.weixin.qq.com/cgi-bin/user/info/batchget"
+    payload = {
+        "user_list": [{"openid": oid, "lang": lang} for oid in openids]
+    }
+    resp = requests.post(url, params={"access_token": token},
+                         json=payload, timeout=5)
+    data = resp.json()
+    if data.get("errcode", 0) not in (0, None):
+        raise RuntimeError(f"batchget failed: {data}")
+    return data.get("user_info_list", [])
+
+
+def _send_mass_message(token, payload):
+    """
+    群发接口（按 openid 列表）
+    """
+    url = "https://api.weixin.qq.com/cgi-bin/message/mass/send"
+    resp = requests.post(url, params={"access_token": token},
+                         json=payload, timeout=5)
+    data = resp.json()
+    if data.get("errcode", 0) != 0:
+        raise RuntimeError(f"mass send failed: {data}")

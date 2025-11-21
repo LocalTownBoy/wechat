@@ -26,6 +26,8 @@ urlpatterns = (
     url(r'^^papers(/)?$', views.papers),
     # 主动向公众号用户推送文本（需要配置 WX_APPID / WX_SECRET）
     url(r'^^wx/send(/)?$', views.wx_send_message),
+    # 批量获取关注用户信息
+    url(r'^^wx/users/info(/)?$', views.wx_users_info),
 
     # 计数器接口
     url(r'^^api/count(/)?$', views.counter),
