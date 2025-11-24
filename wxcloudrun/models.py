@@ -25,6 +25,7 @@ class Paper(models.Model):
     author = models.CharField(max_length=255)
     section = models.CharField(max_length=255)
     created_at = models.DateTimeField(auto_now_add=True)
+    url = models.CharField(max_length=512, null=True, blank=True)
 
     class Meta:
         db_table = 'papers'

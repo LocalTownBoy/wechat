@@ -1,4 +1,5 @@
 import datetime
+import io
 import json
 import logging
 import os
@@ -11,6 +12,7 @@ from django.shortcuts import render
 from openpyxl import Workbook, load_workbook
 import requests
 import pdfplumber
+from qcloud_cos import CosConfig, CosS3Client
 from wxcloudrun.models import Counters, Paper
 
 
@@ -19,6 +21,11 @@ EXCEL_FILE_NAME = 'push_messages.xlsx'
 WX_APPID = os.getenv("WX_APPID")
 WX_SECRET = os.getenv("WX_SECRET")
 _token_cache = {"value": None, "expires_at": 0}
+COS_SECRET_ID = os.getenv("COS_SECRET_ID_pdf")
+COS_SECRET_KEY = os.getenv("COS_SECRET_KEY_pdf")
+COS_REGION = os.getenv("COS_REGION_pdf")
+COS_BUCKET = os.getenv("COS_BUCKET_pdf")
+COS_PREFIX = os.getenv("COS_PREFIX", "papers/")
 
 
 def index(request, _):
@@ -131,13 +138,17 @@ def papers(request, _):
         author = request.POST.get('author', '').strip()
         section = request.POST.get('section', '').strip()
         pdf_file = request.FILES.get('pdf')
+        upload_url = None
+        pdf_bytes = None
 
         if pdf_file:
             try:
-                parsed = _parse_pdf(pdf_file)
+                pdf_bytes = pdf_file.read()
+                parsed = _parse_pdf(io.BytesIO(pdf_bytes), getattr(pdf_file, 'name', ''))
                 title = title or parsed.get('title', '')
                 author = author or parsed.get('author', '')
                 section = section or parsed.get('sections_text', '')
+                upload_url = _upload_pdf_to_cos(pdf_bytes, getattr(pdf_file, 'name', 'paper.pdf'))
             except Exception as exc:  # pylint: disable=broad-except
                 logger.exception('failed to parse pdf: %s', exc)
                 error = 'PDF 解析失败，请检查文件格式'
@@ -146,7 +157,7 @@ def papers(request, _):
             error = '请完整填写标题、作者和章节'
         else:
             try:
-                Paper.objects.create(title=title, author=author, section=section)
+                Paper.objects.create(title=title, author=author, section=section, url=upload_url)
                 message = '已保存！'
             except Exception as exc:  # pylint: disable=broad-except
                 logger.exception('failed to save paper: %s', exc)
@@ -364,7 +375,7 @@ def _load_or_create_workbook(excel_path):
     return workbook
 
 
-def _parse_pdf(pdf_file):
+def _parse_pdf(pdf_file, filename=''):
     """
     解析上传的 PDF，返回标题、作者、章节列表的最佳猜测
     """
@@ -373,8 +384,8 @@ def _parse_pdf(pdf_file):
     except Exception:  # pylint: disable=broad-except
         pass
 
-    filename = getattr(pdf_file, 'name', '') or ''
-    base_title = os.path.splitext(os.path.basename(filename))[0] if filename else ''
+    fname = filename or getattr(pdf_file, 'name', '') or ''
+    base_title = os.path.splitext(os.path.basename(fname))[0] if fname else ''
 
     with pdfplumber.open(pdf_file) as pdf:
         # 尝试读取元数据
@@ -492,10 +503,33 @@ def _send_mass_message(payload):
     """
     群发接口（按 openid 列表）
     """
-    url = "http://api.weixin.qq.com/cgi-bin/message/mass/send"
+    url = "https://api.weixin.qq.com/cgi-bin/message/mass/send"
     resp = requests.post(url,
                          json=payload, timeout=5)
     data = resp.json()
     if data.get("errcode", 0) != 0:
         raise RuntimeError(f"mass send failed: {data}")
     return data
+
+
+def _upload_pdf_to_cos(pdf_bytes, filename):
+    """
+    上传 PDF 到腾讯云 COS，返回可访问的 URL
+    """
+    if not (COS_SECRET_ID and COS_SECRET_KEY and COS_REGION and COS_BUCKET):
+        raise RuntimeError('未配置 COS_SECRET_ID/COS_SECRET_KEY/COS_REGION/COS_BUCKET')
+
+    config = CosConfig(Region=COS_REGION, SecretId=COS_SECRET_ID, SecretKey=COS_SECRET_KEY)
+    client = CosS3Client(config)
+
+    safe_prefix = COS_PREFIX if COS_PREFIX.endswith('/') else COS_PREFIX + '/'
+    key = f"{safe_prefix}{int(time.time())}_{os.path.basename(filename or 'paper.pdf')}"
+
+    client.put_object(
+        Bucket=COS_BUCKET,
+        Body=pdf_bytes,
+        Key=key,
+        ContentType='application/pdf'
+    )
+    url = f"https://{COS_BUCKET}.cos.{COS_REGION}.myqcloud.com/{key}"
+    return url
