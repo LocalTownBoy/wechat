@@ -329,19 +329,23 @@ def _append_to_excel(payload):
     """
     将推送消息写入Excel，按时间顺序追加
     """
+    # 获取Excel文件路径
     excel_path = getattr(settings, 'PUSH_MSG_EXCEL_PATH',
                          os.path.join(settings.BASE_DIR, EXCEL_FILE_NAME))
     directory = os.path.dirname(excel_path)
 
     if directory and not os.path.exists(directory):
         os.makedirs(directory, exist_ok=True)
-
+    # 创建文件夹
     workbook = _load_or_create_workbook(excel_path)
+    # 获取活动表
     sheet = workbook.active
+    # 追加数据行
     sheet.append([
         datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         json.dumps(payload, ensure_ascii=False)
     ])
+    # 保存文件
     workbook.save(excel_path)
     return excel_path
 

@@ -111,6 +111,41 @@ curl https://<云托管服务域名>/api/count
 ```
 curl -X POST -H 'content-type: application/json' -d '{"action": "inc"}' https://<云托管服务域名>/api/count
 ```
+### 整体设计思路
+![alt text](image/image.png)
+
+### `POST /push/msg`
+
+接收公众号推送的 JSON 消息并写入 Excel（默认 `push_messages.xlsx`，路径可通过 `settings.PUSH_MSG_EXCEL_PATH` 配置）。
+
+- 请求：任意合法 JSON，推荐保持微信推送原文。
+- 响应：`{"code":0,"data":{"file":"/app/push_messages.xlsx"}}`。
+
+配套查看页面：`GET /push/list`，以表格形式展示 Excel 内容。
+#### 消息发送设计思路
+![alt text](image/push-msg.png)
+
+### 论文收集（页面+接口）
+- 页面：`GET /papers`，包含表单 + 历史记录表格。
+- 提交：表单或 `POST /papers`，字段 `title`、`author`、`section`，可选上传 `pdf`（尝试用 pdfplumber 解析标题/作者/章节）。
+- 数据存储：Django ORM，表 `papers`（使用 `settings.py` 中的数据库配置）。
+  - 创建表语句 ![alt text](sql/papers.sql)
+
+### 公众号消息能力
+
+- 主动群发：`POST /wx/send`
+  - 请求体示例（当前仅支持文本）：  
+    ```json
+    {
+      "touser": ["openid1", "openid2"],
+      "msgtype": "text",
+      "text": {"content": "你好"},
+      "send_ignore_reprint": 0
+    }
+    ```
+  - `touser` 至少 2 个，最多 10000 个 openid。需配置环境变量 `WX_APPID`、`WX_SECRET`。
+  - 如需免维护 access_token，可在微信云托管开通“云调用”，用云调用 SDK/HTTP 网关替换当前代码里 `_get_access_token`+`requests` 调用，由平台代管 token。
+
 
 ## 使用注意
 如果不是通过微信云托管控制台部署模板代码，而是自行复制/下载模板代码后，手动新建一个服务并部署，需要在「服务设置」中补全以下环境变量，才可正常使用，否则会引发无法连接数据库，进而导致部署失败。
