@@ -114,6 +114,11 @@ curl -X POST -H 'content-type: application/json' -d '{"action": "inc"}' https://
 ### 整体设计思路
 ![alt text](image/image.png)
 
+### 前端页面说明
+- `/`：默认主页，计数器演示。
+- `/push/list`：展示写入 Excel 的公众号消息列表。
+- `/papers`：论文收集页面，支持填写/上传 PDF，显示历史记录及附件下载。
+
 ### `POST /push/msg`
 
 接收公众号推送的 JSON 消息并写入 Excel（默认 `push_messages.xlsx`，路径可通过 `settings.PUSH_MSG_EXCEL_PATH` 配置）。
@@ -144,7 +149,7 @@ curl -X POST -H 'content-type: application/json' -d '{"action": "inc"}' https://
       "send_ignore_reprint": 0
     }
     ```
-  - `touser` 至少 2 个，最多 10000 个 openid。需配置环境变量 `WX_APPID`、`WX_SECRET`。
+  - `touser` 至少 1 个，最多 10000 个 openid。需配置环境变量 `WX_APPID`、`WX_SECRET`。
   - 如需免维护 access_token，可在微信云托管开通“云调用”，用云调用 SDK/HTTP 网关替换当前代码里 `_get_access_token`+`requests` 调用，由平台代管 token。
 
 
