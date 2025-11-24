@@ -128,8 +128,9 @@ curl -X POST -H 'content-type: application/json' -d '{"action": "inc"}' https://
 ### 论文收集（页面+接口）
 - 页面：`GET /papers`，包含表单 + 历史记录表格。
 - 提交：表单或 `POST /papers`，字段 `title`、`author`、`section`，可选上传 `pdf`（尝试用 pdfplumber 解析标题/作者/章节）。
-- 数据存储：Django ORM，表 `papers`（使用 `settings.py` 中的数据库配置）。
-  - 创建表语句 ![alt text](sql/papers.sql)
+- PDF 存储：上传的 PDF 会同步上传至腾讯云 COS，返回的下载 URL 一并保存并在列表展示，支持直接下载。
+- 数据存储：Django ORM，表 `papers`（使用 `settings.py` 中的数据库配置，需迁移或手动创建表，包含 `url` 列）。
+- COS 配置：需要环境变量 `COS_SECRET_ID`、`COS_SECRET_KEY`、`COS_REGION`、`COS_BUCKET`，可选 `COS_PREFIX`（默认 `papers/`）。
 
 ### 公众号消息能力
 

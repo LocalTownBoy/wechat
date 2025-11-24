@@ -12,7 +12,7 @@ from django.shortcuts import render
 from openpyxl import Workbook, load_workbook
 import requests
 import pdfplumber
-from qcloud_cos import CosConfig, CosS3Client
+from qcloud_cos import CosConfig, CosS3Client  # COS SDK，用于上传 PDF
 from wxcloudrun.models import Counters, Paper
 
 
@@ -21,6 +21,7 @@ EXCEL_FILE_NAME = 'push_messages.xlsx'
 WX_APPID = os.getenv("WX_APPID")
 WX_SECRET = os.getenv("WX_SECRET")
 _token_cache = {"value": None, "expires_at": 0}
+# COS 配置（论文 PDF 会上传到对象存储）
 COS_SECRET_ID = os.getenv("COS_SECRET_ID_pdf")
 COS_SECRET_KEY = os.getenv("COS_SECRET_KEY_pdf")
 COS_REGION = os.getenv("COS_REGION_pdf")
@@ -128,6 +129,7 @@ def push_msg_list(request, _):
 def papers(request, _):
     """
     收集论文信息（标题、作者、章节）并存入数据库，返回列表页面
+    - 支持直接填写文本，也支持上传 PDF 自动解析并上传 COS
     """
     message = None
     error = None
@@ -143,7 +145,7 @@ def papers(request, _):
 
         if pdf_file:
             try:
-                pdf_bytes = pdf_file.read()
+                pdf_bytes = pdf_file.read()  # 原始文件内容
                 parsed = _parse_pdf(io.BytesIO(pdf_bytes), getattr(pdf_file, 'name', ''))
                 title = title or parsed.get('title', '')
                 author = author or parsed.get('author', '')
@@ -157,6 +159,7 @@ def papers(request, _):
             error = '请完整填写标题、作者和章节'
         else:
             try:
+                # 保存解析/用户填写的信息及文件 URL
                 Paper.objects.create(title=title, author=author, section=section, url=upload_url)
                 message = '已保存！'
             except Exception as exc:  # pylint: disable=broad-except
@@ -164,6 +167,7 @@ def papers(request, _):
                 error = '保存失败，请检查日志'
 
     try:
+        # 从数据库中获取论文列表
         papers = Paper.objects.order_by('-id').all()
     except Exception as exc:  # pylint: disable=broad-except
         logger.exception('failed to load papers: %s', exc)
@@ -378,6 +382,7 @@ def _load_or_create_workbook(excel_path):
 def _parse_pdf(pdf_file, filename=''):
     """
     解析上传的 PDF，返回标题、作者、章节列表的最佳猜测
+    - 优先读取元数据，其次读取前几页文本，最后回退文件名
     """
     try:
         pdf_file.seek(0)
@@ -466,22 +471,6 @@ def _get_access_token():
     return _token_cache["value"]
 
 
-def _send_wechat_text(token, openid, content):
-    """
-    调用公众号客服消息接口发送文本
-    """
-    url = "https://api.weixin.qq.com/cgi-bin/message/custom/send"
-    payload = {
-        "touser": openid,
-        "msgtype": "text",
-        "text": {"content": content}
-    }
-    resp = requests.post(url, params={"access_token": token},
-                         json=payload, timeout=5)
-    data = resp.json()
-    if data.get("errcode", 0) != 0:
-        raise RuntimeError(f"send message failed: {data}")
-
 
 def _batch_get_users(token, openids, lang):
     """
@@ -503,7 +492,7 @@ def _send_mass_message(payload):
     """
     群发接口（按 openid 列表）
     """
-    url = "https://api.weixin.qq.com/cgi-bin/message/mass/send"
+    url = "http://api.weixin.qq.com/cgi-bin/message/mass/send"
     resp = requests.post(url,
                          json=payload, timeout=5)
     data = resp.json()
@@ -515,6 +504,8 @@ def _send_mass_message(payload):
 def _upload_pdf_to_cos(pdf_bytes, filename):
     """
     上传 PDF 到腾讯云 COS，返回可访问的 URL
+    - 依赖环境变量 COS_SECRET_ID/KEY/REGION/BUCKET
+    - COS_PREFIX 可选，默认 papers/
     """
     if not (COS_SECRET_ID and COS_SECRET_KEY and COS_REGION and COS_BUCKET):
         raise RuntimeError('未配置 COS_SECRET_ID/COS_SECRET_KEY/COS_REGION/COS_BUCKET')

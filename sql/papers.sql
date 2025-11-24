@@ -1,7 +1,9 @@
-CREATE TABLE papers (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    title VARCHAR(512) NOT NULL COMMENT '论文标题',
-    authors VARCHAR(512) NOT NULL COMMENT '作者列表',
-    chapter VARCHAR(255) DEFAULT NULL COMMENT '所属章节或部分',
-    url VARCHAR(1024) DEFAULT NULL COMMENT '论文链接'
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='论文信息表';
+CREATE TABLE `papers` (
+    `id` int NOT NULL AUTO_INCREMENT,
+    `title` varchar(255) NOT NULL COMMENT '论文标题',
+    `author` varchar(255) NOT NULL COMMENT '作者',
+    `section` varchar(255) NOT NULL COMMENT '章节',
+    `created_at` datetime(6) NOT NULL COMMENT '创建时间',
+    `url` varchar(512) DEFAULT NULL COMMENT 'URL',
+    PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
